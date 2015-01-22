@@ -1,0 +1,116 @@
+
+#Practical Machine Learning-- Activity Recognition Project#
+
+  The goal of this project is to design a machine learning model by using the provided data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants and also implement the fitted model to predict activity for user feedbacks. The data set were collected from the participants who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+  
+  More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+The training data set ( https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv ) and the test data set ( https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv ) are provided. The provided training set contains 19622 records with 160 variables is for training the model. And, the purpose of the test set of 20 records is to test the fitted model from this project to predict the suitable feedbacks for classification.
+
+##*Preliminary approach:*
+
+1.  *Data splitting*: the createDataPartition() was used to split the provided data set into training set (3/4 of original data set, 14718 records) and testing set(4909 records). 
+2.  *Data preprocess*: the data set contains 159 predictors with a response variable ("classe", 5 levels of A,B,C,D,E), some of the predictors need to be deleted or transformed in order to fit the machine learning model. 
+  + 1.	The identity variables and time stamp variables were deleted(column 1-7). 
+  + 2.	The factor variables were transformed into numeric variables
+  + 3.	The "near zero variance" variables were deleted by using nearZeroVar() in caret package.
+  + 4.	Records with values of NA were taking care of by using "bagImpute" method in preProcess()
+3.	*Feature extraction*: The principle componentsthe were selected by "pca" method of preProcess() with thresh = 0.85 
+
+##*Model selection and implementing:*
+
+   Random Forest approach was chosen in the project to fit the model due to the characteristic noise in the sensor data. In order to optimize the fitted model, ntree was set to 150 and proximity and importance all were set to TRUE.
+
+##*Results:*
+
+
+```{r, include=FALSE}
+library(caret)
+library(e1071)
+library(lattice)
+library(ggplot2)
+library(dplyr)
+library(randomForest)
+
+set.seed(89987)
+## read data and create training set and testing set in data
+adData <- read.csv("pml-training.csv", header=TRUE)
+inTrain = createDataPartition(adData$classe, p = 3/4)[[1]]##or createDataPartition(allData$classe, p=0.75, list=FALSE)
+training = adData[ inTrain,]
+testing = adData[-inTrain,]
+##This data is for test to answer the Q
+test <- read.csv("pml-testing.csv")
+
+###delete the first 7 identity variables 
+
+subtraining <- training[,8:length(training)]
+subtesting <- testing[,8:length(testing)]
+subtest <- test[,8:length(test)]
+
+###turn every columns into numeric
+
+subtraining[] <- lapply(subtraining, function(x) as.numeric(x))
+subtesting[] <- lapply(subtesting, function(x) as.numeric(x))
+subtest[] <- lapply(subtest, function(x) as.numeric(x))
+
+
+###get rid of near zero variance variables
+nzv <- nearZeroVar(subtraining)
+filteredtraining <- subtraining[, -nzv]
+filteredtesting <- subtesting[, -nzv]
+filteredtest <-subtest[, -nzv]
+
+###preProcess with "bagImpute" that taking care of NA
+
+preKnn <- preProcess(filteredtraining[,-length(filteredtraining)], method="bagImpute")
+trainKnn <- predict(preKnn, filteredtraining[,-length(filteredtraining)])
+testKnn <- predict(preKnn, filteredtesting[,-length(filteredtesting)])
+finalKnn <- predict(preKnn, filteredtest[,-length(filteredtest)])
+
+###preProcess with pca for feature extraction
+preProPC <- preProcess(trainKnn, method="pca", thresh=0.85)
+trainFinal <- predict(preProPC, trainKnn)
+testFinal <- predict(preProPC, testKnn)
+final <- predict(preProPC, finalKnn)
+
+###Model selection
+modelFitRF=randomForest(training$classe~.,data=trainFinal, ntree=150,importance=TRUE, proximity=T)
+```
+The final results of random forests model on the training set are pretty impressive,  the estimate of out-of-bag error rate is low (about 0.05). Below is the summary of the fitted model.
+
+```{r, echo=FALSE}
+modelFitRF
+```
+
+The plots below show decreasing means of Accuracy of each features(Left) and decreasing mean Gini of each predictors(right)
+
+```{r, echo=FALSE}
+varImpPlot(modelFitRF, pch=19, col="blue", 
+           main = list("Importance Rank of Predictors", font = 4, cex = 1))
+```
+
+The plot below shows the relationship between Error rates and the number of Trees, the chosen number of trees of 150 is well justified.
+
+```{r, echo=FALSE}
+plot(modelFitRF)
+```
+
+From the table of confusion matrix and statistics, it seems that the activities from the testig data set were grouped pretty nicely, only a few activities were not caught correctly by the classification model. The total Accuracy of predicition is around 0.95.
+
+```{r, echo=FALSE}
+predTest <- predict(modelFitRF, testFinal)
+confusionMatrix(predTest, testing$classe)
+```
+
+The expected values of the test set provided below. The values came out a little different for each run, and the most mistakes happened in detecting class B activity. Since the sensitivity of Class B is the lowest one, the result is expected 
+
+```{r, echo=FALSE}
+pred <- predict(modelFitRF, final)
+print("The predictive classification of the test is ")
+pred
+```
+
+##*Conclusion*
+
+  From the results of misclassification error rates, I can conclude that random forest is a pretty good model for analyzing and predicting this qualitative activity recognition data set.
+  
+  I used a lot of methods in caret package to clean and transform data set(e.g. "bagImp","nearZeroVar","pca"), but in the end I chosed to use simple randomForest() from randomForest package instead of randomForest method in caret package because of memory size problem. If the problem of memory size can be solved, further investigation might give us more possibilities.
